@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>MonkMarket Razorpay Test</title>
+
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 60px auto;
+        }
+
+        input, button {
+            padding: 10px;
+            margin: 6px 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        #result {
+            margin-top: 20px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+
+<body>
+
+<h2>MonkMarket Razorpay Test</h2>
+
+<label>Internal Order ID</label>
+<input
+        id="orderId"
+        value="2ace8101-859f-4e74-bee8-4dd8fc928451"
+/>
+
+<label>User ID</label>
+<input
+        id="userId"
+        value="d0799677-6957-4b67-8ea5-debf0c529e88"
+/>
+
+<button onclick="startPayment()">
+    Pay with Razorpay Test Mode
+</button>
+
+<div id="result"></div>
+
+<script>
+
+    async function startPayment() {
+
+        const orderId =
+            document.getElementById("orderId").value;
+
+        const userId =
+            document.getElementById("userId").value;
+
+        const result =
+            document.getElementById("result");
+
+        result.textContent =
+            "Creating Razorpay payment order...";
+
+        try {
+
+            // 1. Ask our backend to create Razorpay Order
+            const response = await fetch(
+                "/api/v1/payments/orders",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-User-Id": userId
+                    },
+
+                    body: JSON.stringify({
+                        orderId: orderId
+                    })
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(
+                    await response.text()
+                );
+            }
+
+            const paymentOrder =
+                await response.json();
+
+            console.log(
+                "Payment order:",
+                paymentOrder
+            );
+
+            // 2. Open Razorpay Checkout
+            const options = {
+
+                key: "rzp_test_TTytPp16m1heFY",
+
+                amount:
+                    paymentOrder.amountInPaise,
+
+                currency:
+                    paymentOrder.currency,
+
+                name:
+                    "MonkMarket",
+
+                description:
+                    "MonkMarket Test Payment",
+
+                order_id:
+                    paymentOrder.razorpayOrderId,
+
+                handler:
+                    async function (paymentResponse) {
+
+                        console.log(
+                            "Razorpay response:",
+                            paymentResponse
+                        );
+
+                        result.textContent =
+                            "Payment received from Razorpay.\n"
+                            + JSON.stringify(
+                                paymentResponse,
+                                null,
+                                2
+                            );
+
+                        // 3. Send payment details
+                        //    to our backend for signature verification
+                        const verifyResponse =
+                            await fetch(
+                                "/api/v1/payments/verify",
+                                {
+                                    method: "POST",
+
+                                    headers: {
+                                        "Content-Type":
+                                            "application/json",
+
+                                        "X-User-Id":
+                                            userId
+                                    },
+
+                                    body: JSON.stringify({
+
+                                        orderId:
+                                            orderId,
+
+                                        razorpayPaymentId:
+                                            paymentResponse
+                                                .razorpay_payment_id,
+
+                                        razorpaySignature:
+                                            paymentResponse
+                                                .razorpay_signature
+                                    })
+                                }
+                            );
+
+                        const verifyText =
+                            await verifyResponse.text();
+
+                        result.textContent +=
+                            "\n\nVerification:\n"
+                            + verifyText;
+                    },
+
+                modal: {
+                    ondismiss: function () {
+
+                        result.textContent =
+                            "Checkout closed.";
+                    }
+                },
+
+                theme: {
+                    color: "#3399cc"
+                }
+            };
+
+            const razorpay =
+                new Razorpay(options);
+
+            razorpay.on(
+                "payment.failed",
+                function (response) {
+
+                    console.error(
+                        "Payment failed:",
+                        response
+                    );
+
+                    result.textContent =
+                        "Payment failed:\n"
+                        + JSON.stringify(
+                            response,
+                            null,
+                            2
+                        );
+                }
+            );
+
+            razorpay.open();
+
+        } catch (error) {
+
+            console.error(error);
+
+            result.textContent =
+                "ERROR:\n"
+                + error.message;
+        }
+    }
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,27 @@
+
+package com.monkmarket.auditservice.model;
+
+public enum AuditAction {
+
+    USER_REGISTERED,
+    USER_LOGGED_IN,
+
+    PRODUCT_CREATED,
+    PRODUCT_UPDATED,
+    PRODUCT_DELETED,
+
+    CART_ITEM_ADDED,
+    CART_ITEM_UPDATED,
+    CART_ITEM_REMOVED,
+    CART_CLEARED,
+
+    ORDER_CREATED,
+    PAYMENT_STARTED,
+    PAYMENT_COMPLETED,
+    PAYMENT_FAILED,
+    ORDER_CANCELLED,
+
+    AGENT_REQUEST,
+    AGENT_RESPONSE,
+    AGENT_TOOL_CALL
+}

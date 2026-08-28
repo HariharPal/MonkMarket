@@ -1,0 +1,33 @@
+# IntelliJ
+.idea/
+*.iml
+
+# Maven
+**/target/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Local Spring configuration
+**/application-local.properties
+**/application-secrets.properties
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Flutter
+frontend/**/.dart_tool/
+frontend/**/.flutter-plugins
+frontend/**/.flutter-plugins-dependencies
+frontend/**/build/
+frontend/**/.pub-cache/
+
+# Generated
+**/HELP.md

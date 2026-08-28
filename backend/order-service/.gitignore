@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+
+application-local.properties
+
+target/
+.idea/
+*.iml
+
+logs/
+*.log
