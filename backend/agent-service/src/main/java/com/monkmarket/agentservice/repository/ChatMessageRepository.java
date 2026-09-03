@@ -12,4 +12,13 @@ public interface ChatMessageRepository
     List<ChatMessage> findBySessionIdOrderByCreatedAtAsc(
             UUID sessionId
     );
+
+    List<ChatMessage> findTop20BySessionIdOrderByCreatedAtDesc(
+            UUID sessionId
+    );
+
+
+    long countBySessionId(
+            UUID sessionId
+    );
 }

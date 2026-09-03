@@ -1,4 +1,3 @@
-
 package com.monkmarket.agentservice.dto;
 
 import com.monkmarket.agentservice.model.ChatMessage;
@@ -11,9 +10,17 @@ public record ChatMessageResponse(
 
         UUID id,
 
+        UUID requestId,
+
         MessageRole role,
 
         String content,
+
+        String toolName,
+
+        String toolInput,
+
+        String toolOutput,
 
         LocalDateTime createdAt
 
@@ -25,8 +32,12 @@ public record ChatMessageResponse(
 
         return new ChatMessageResponse(
                 message.getId(),
+                message.getRequestId(),
                 message.getRole(),
                 message.getContent(),
+                message.getToolName(),
+                message.getToolInput(),
+                message.getToolOutput(),
                 message.getCreatedAt()
         );
     }

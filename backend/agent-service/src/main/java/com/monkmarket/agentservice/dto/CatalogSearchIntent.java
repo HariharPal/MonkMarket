@@ -6,6 +6,8 @@ public record CatalogSearchIntent(
 
         String searchQuery,
 
+        List<String> searchTerms,
+
         List<String> categories,
 
         boolean categoryOnly

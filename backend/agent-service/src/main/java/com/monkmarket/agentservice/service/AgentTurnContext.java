@@ -10,6 +10,7 @@ import org.springframework.web.context.annotation.RequestScope;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Component
 @RequestScope
@@ -17,6 +18,35 @@ import java.util.List;
 public class AgentTurnContext {
     @Setter
     private CheckoutResponseState checkout;
+
+    private UUID requestId;
+
+    private UUID userId;
+    private UUID sessionId;
+
+    public void setUserId(UUID userId) {
+        this.userId = userId;
+    }
+
+    public void setSessionId(UUID sessionId) {
+        this.sessionId = sessionId;
+    }
+
+    public UUID getUserId() {
+        return userId;
+    }
+
+    public UUID getSessionId() {
+        return sessionId;
+    }
+
+    public void setRequestId(UUID requestId) {
+        this.requestId = requestId;
+    }
+
+    public UUID getRequestId() {
+        return requestId;
+    }
 
 
     public void clearCheckout() {

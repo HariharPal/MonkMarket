@@ -1,214 +1,126 @@
 services:
+
   postgres:
     image: postgres:16
     container_name: monkmarket-postgres
+    restart: unless-stopped
+
     environment:
-      POSTGRES_USER: ${POSTGRES_USERNAME}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: monkmarket
+
     ports:
       - "5432:5432"
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+
     healthcheck:
       test:
-        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME} -d ${POSTGRES_DB}"]
-      interval: 10s
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USERNAME:-postgres} -d monkmarket"
+        ]
+      interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+
     networks:
       - monkmarket-network
 
   service-registry:
     build:
-      context: ./backend/service-registry
+      context: ./service-registry
+
     container_name: monkmarket-service-registry
+    restart: unless-stopped
+
     ports:
       - "8761:8761"
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -q --spider http://localhost:8761/actuator/health || exit 1",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 30s
+
+    environment:
+      SERVER_PORT: 8761
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m"
+
     networks:
       - monkmarket-network
 
   gateway-service:
     build:
-      context: ./backend/gateway-service
+      context: ./gateway-service
+
     container_name: monkmarket-gateway
+    restart: unless-stopped
+
     ports:
       - "8080:8080"
+
     environment:
       SERVER_PORT: 8080
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx384m"
+
     depends_on:
       service-registry:
-        condition: service_healthy
+        condition: service_started
+
     networks:
       - monkmarket-network
 
-  auth-service:
+  identity-service:
     build:
-      context: ./backend/auth-service
-    container_name: monkmarket-auth
+      context: ./identity-service
+
+    container_name: monkmarket-identity
+    restart: unless-stopped
+
     ports:
       - "8081:8081"
+
     environment:
       SERVER_PORT: 8081
 
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/monkmarket
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USERNAME:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
 
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
 
       JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRATION: ${JWT_EXPIRATION}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+
+      HEALTH_SHOW_DETAILS: ${HEALTH_SHOW_DETAILS:-NEVER}
+
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx384m"
 
     depends_on:
       postgres:
         condition: service_healthy
       service-registry:
-        condition: service_healthy
+        condition: service_started
+
     networks:
       - monkmarket-network
 
-  catalog-service:
+  commerce-service:
     build:
-      context: ./backend/catalog-service
-    container_name: monkmarket-catalog
+      context: ./commerce-service
+
+    container_name: monkmarket-commerce
+    restart: unless-stopped
+
     ports:
       - "8082:8082"
+
     environment:
       SERVER_PORT: 8082
 
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
-
-    depends_on:
-      postgres:
-        condition: service_healthy
-      service-registry:
-        condition: service_healthy
-    networks:
-      - monkmarket-network
-
-  order-service:
-    build:
-      context: ./backend/order-service
-    container_name: monkmarket-order
-    ports:
-      - "8083:8083"
-    environment:
-      SERVER_PORT: 8083
-
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
-
-    depends_on:
-      postgres:
-        condition: service_healthy
-      service-registry:
-        condition: service_healthy
-    networks:
-      - monkmarket-network
-
-  cart-service:
-    build:
-      context: ./backend/cart-service
-    container_name: monkmarket-cart
-    ports:
-      - "8085:8085"
-    environment:
-      SERVER_PORT: 8085
-
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
-
-    depends_on:
-      postgres:
-        condition: service_healthy
-      service-registry:
-        condition: service_healthy
-    networks:
-      - monkmarket-network
-
-  audit-service:
-    build:
-      context: ./backend/audit-service
-    container_name: monkmarket-audit
-    ports:
-      - "8086:8086"
-    environment:
-      SERVER_PORT: 8086
-
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
-
-    depends_on:
-      postgres:
-        condition: service_healthy
-      service-registry:
-        condition: service_healthy
-    networks:
-      - monkmarket-network
-
-  agent-service:
-    build:
-      context: ./backend/agent-service
-    container_name: monkmarket-agent
-    ports:
-      - "8087:8087"
-    environment:
-      SERVER_PORT: 8087
-
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
-
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-      GEMINI_MODEL: ${GEMINI_MODEL}
-
-    depends_on:
-      postgres:
-        condition: service_healthy
-      service-registry:
-        condition: service_healthy
-    networks:
-      - monkmarket-network
-
-  payment-service:
-    build:
-      context: ./backend/payment-service
-    container_name: monkmarket-payment
-    ports:
-      - "8088:8088"
-    environment:
-      SERVER_PORT: 8088
-
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/monkmarket
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USERNAME:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
 
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
 
@@ -216,11 +128,55 @@ services:
       RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
       RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
 
+      HEALTH_SHOW_DETAILS: ${HEALTH_SHOW_DETAILS:-NEVER}
+
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx768m"
+
     depends_on:
       postgres:
         condition: service_healthy
       service-registry:
+        condition: service_started
+
+    networks:
+      - monkmarket-network
+
+  agent-service:
+    build:
+      context: ./agent-service
+
+    container_name: monkmarket-agent
+    restart: unless-stopped
+
+    ports:
+      - "8087:8087"
+
+    environment:
+      SERVER_PORT: 8087
+
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/monkmarket
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USERNAME:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
+
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite-preview}
+
+      COMMERCE_SERVICE_URL: http://commerce-service:8082
+
+      HEALTH_SHOW_DETAILS: ${HEALTH_SHOW_DETAILS:-NEVER}
+
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx768m"
+
+    depends_on:
+      postgres:
         condition: service_healthy
+      service-registry:
+        condition: service_started
+      commerce-service:
+        condition: service_started
+
     networks:
       - monkmarket-network
 

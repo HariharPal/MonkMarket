@@ -2,9 +2,7 @@ package com.monkmarket.agentservice.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.monkmarket.agentservice.client.CartClient;
-import com.monkmarket.agentservice.client.OrderClient;
-import com.monkmarket.agentservice.client.PaymentClient;
+import com.monkmarket.agentservice.client.CommerceClient;
 import com.monkmarket.agentservice.dto.*;
 import com.monkmarket.agentservice.model.ChatMessage;
 import com.monkmarket.agentservice.model.ChatSession;
@@ -13,12 +11,14 @@ import com.monkmarket.agentservice.model.MessageRole;
 import com.monkmarket.agentservice.repository.ChatMessageRepository;
 import com.monkmarket.agentservice.repository.ChatSessionRepository;
 import com.monkmarket.agentservice.tool.AgentTools;
-import com.monkmarket.agentservice.tool.OrderTools;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,13 +36,13 @@ public class AgentService {
     private final AgentTurnContext turnContext;
 
     private final AgentTools agentTools;
-    private final OrderClient orderClient;
-    private final CartClient cartClient;
-    private final PaymentClient paymentClient;
-    private final OrderTools orderTools;
+    private final CommerceClient commerceClient;
+    private final AgentAuditService agentAuditService;
+
 
     private final ChatSessionRepository chatSessionRepository;
     private final ChatMessageRepository chatMessageRepository;
+    private final ResourceLoader resourceLoader;
 
     private final ObjectMapper objectMapper;
 
@@ -52,11 +52,84 @@ public class AgentService {
             AgentChatRequest request
     ) {
 
+        UUID requestId = UUID.randomUUID();
+
+        turnContext.setRequestId(requestId);
+
+
+
+        long start =
+                System.nanoTime();
+
+        try {
+
+            AgentChatResponse response =
+                    chatInternal(
+                            userId,
+                            request
+                    );
+
+            long latencyMs =
+                    (System.nanoTime() - start)
+                            / 1_000_000;
+
+            agentAuditService.recordSuccess(
+                    requestId,
+                    userId,
+                    response.sessionId(),
+                    request.message(),
+                    response,
+                    latencyMs
+            );
+
+            return response;
+
+        } catch (Exception e) {
+
+            long latencyMs =
+                    (System.nanoTime() - start)
+                            / 1_000_000;
+
+            UUID sessionId = null;
+
+            try {
+                if (request.sessionId() != null
+                        && !request.sessionId().isBlank()) {
+
+                    sessionId =
+                            UUID.fromString(
+                                    request.sessionId()
+                            );
+                }
+            } catch (Exception ignored) {
+            }
+
+            agentAuditService.recordFailure(
+                    requestId,
+                    userId,
+                    sessionId,
+                    request.message(),
+                    e,
+                    latencyMs
+            );
+
+            throw e;
+        }
+    }
+
+    public AgentChatResponse chatInternal(
+            UUID userId,
+            AgentChatRequest request
+    ) {
+
         ChatSession session =
                 getOrCreateSession(
                         userId,
                         request.sessionId()
                 );
+
+        turnContext.setUserId(userId);
+        turnContext.setSessionId(session.getId());
 
         turnContext.clearProducts();
         turnContext.clearRecommendations();
@@ -73,32 +146,37 @@ public class AgentService {
 
             ConfirmationDecision decision =
                     classifyConfirmation(
-                            request.message()
+                            request.message(),
+                            session
                     );
+
+            System.out.println(
+                    "CHECKOUT DECISION => confirmed="
+                            + decision.confirmed()
+                            + ", rejected="
+                            + decision.rejected()
+            );
 
             if (decision.confirmed()) {
 
-                String orderJson =
-                        orderClient.createOrder(
+                CommerceClient.CommerceOrderResponse order =
+                        commerceClient.createOrder(
                                 userId,
                                 session.getPendingCheckoutCartId(),
                                 session.getPendingCheckoutIdempotencyKey(),
                                 true
                         );
 
-                UUID orderId =
-                        extractOrderId(
-                                orderJson
-                        );
+                UUID orderId = order.id();
 
                 PaymentOrderResponse payment =
-                        paymentClient.createPaymentOrder(
+                        commerceClient.createPaymentOrder(
                                 userId,
                                 orderId
                         );
 
                 session.setCheckoutState(
-                        CheckoutState.COMPLETED
+                        CheckoutState.PAYMENT_REQUIRED
                 );
 
                 session.setCheckoutOrderId(
@@ -241,7 +319,7 @@ public class AgentService {
             );
 
             CartResponse cart =
-                    cartClient.getCart(
+                    commerceClient.getCart(
                             userId
                     );
 
@@ -254,197 +332,56 @@ public class AgentService {
 
         List<ChatMessage> history =
                 chatMessageRepository
-                        .findBySessionIdOrderByCreatedAtAsc(
+                        .findTop20BySessionIdOrderByCreatedAtDesc(
                                 session.getId()
                         );
+
+        java.util.Collections.reverse(history);
 
         List<Message> messages =
                 new ArrayList<>();
 
         for (ChatMessage message : history) {
-
-            if (message.getRole()
-                    == MessageRole.USER) {
-
+            if (message.getRole() == MessageRole.USER) {
                 messages.add(
                         new UserMessage(
                                 message.getContent()
                         )
                 );
-
-            } else {
-
+            } else if (message.getRole() == MessageRole.ASSISTANT) {
                 messages.add(
                         new AssistantMessage(
                                 message.getContent()
                         )
                 );
+            } else if (message.getRole() == MessageRole.TOOL) {
+                messages.add(
+                        new SystemMessage(
+                                "Previous tool result from "
+                                        + message.getToolName()
+                                        + ":\n"
+                                        + message.getToolOutput()
+                        )
+                );
             }
         }
+        String memoryContext = buildMemoryContext(session);
+
+        String systemPrompt = loadSystemPrompt();
+
+        String fullSystemPrompt =
+                systemPrompt
+                        + "\n\n==============================\n"
+                        + "CURRENT SESSION MEMORY\n"
+                        + "==============================\n\n"
+                        + memoryContext;
 
         String response =
                 chatClient
                         .prompt()
-                        .system("""
-                                You are Sahayak, an AI shopping assistant for MonkMarket.
-
-                                ========================================
-                                CORE BEHAVIOR
-                                ========================================
-
-                                - Use tools whenever real application data is required.
-                                - Never invent database values.
-                                - Never claim an action succeeded unless the corresponding
-                                  tool actually succeeded.
-                                - Be concise and clear.
-                                - Never expose internal implementation details, tool names,
-                                  backend errors, JWTs, API keys, or secrets.
-
-                                ========================================
-                                PRODUCT RULES
-                                ========================================
-
-                                - Use searchCatalog whenever the user asks about products.
-                                - searchCatalog accepts natural-language product intent.
-                                - Never invent product names, prices, stock, categories,
-                                  or product IDs.
-                                - Only recommend products returned by searchCatalog.
-                                - Never invent a category.
-                                - The catalog service resolves semantic intent against
-                                  real merchant categories.
-                                - For broad requests, pass the user's natural-language
-                                  intent directly to searchCatalog.
-                                - If searchCatalog returns no products, do not fabricate
-                                  alternatives.
-
-                                ========================================
-                                CART RULES
-                                ========================================
-
-                                - Use getCart when the user asks about their cart.
-                                - Use addToCart only when explicitly asked.
-                                - Use removeFromCart only when explicitly asked.
-                                - Use updateCartQuantity when the user asks to change quantity.
-                                - Use clearCart when explicitly asked to empty the cart.
-                                - Never invent product IDs.
-                                - Quantity must be greater than zero.
-                                - Never automatically add complementary recommendations.
-                                - When the user says "add it", "add that", "add the first one",
-                                  or similar, resolve the reference against actual products
-                                  returned by searchCatalog or actual cart contents.
-                                - Never create an ID from a product name.
-
-                                ========================================
-                                RECOMMENDATION RULES
-                                ========================================
-                                - After a successful addToCart, you may call
-                                  getComplementaryProducts.
-                                - Recommendations must be genuinely complementary
-                                  to the PRODUCT THAT WAS ACTUALLY ADDED.
-                                - Never recommend random catalog products.
-                                - Never automatically add recommendations.
-                                - The user must explicitly request adding a recommendation.
-
-                                ========================================
-                                MULTI-INTENT REQUESTS
-                                ========================================
-
-                                When the user performs multiple actions in one message,
-                                complete each valid action.
-
-                                Example:
-
-                                "Add the shoes and show me earbuds"
-
-                                means:
-
-                                1. Add the referenced shoe.
-                                2. Search the catalog for earbuds.
-                                3. Return the cart update.
-                                4. Return the earbuds search results.
-                                5. Return relevant recommendations for the added shoe.
-
-                                Do not replace specific product search results with an
-                                entire category.
-
-                                ========================================
-                                CHECKOUT RULES
-                                ========================================
-
-                                - Use proposeCheckout when the user explicitly asks to:
-                                  checkout, buy, purchase, place an order,
-                                  or proceed to payment.
-                                - proposeCheckout performs backend guardrails.
-                                - If confirmation is required, do not create an order.
-                                - Wait for the user's confirmation.
-                                - If checkout is allowed, order and payment creation
-                                  happen in the backend.
-                                - Creating a payment session does NOT mean payment
-                                  has been completed.
-                                - Never claim payment success without backend confirmation.
-
-                                ========================================
-                                PAYMENT RULES
-                                ========================================
-
-                                - CREATED = payment pending.
-                                - VERIFIED = payment signature verified.
-                                - PAID = backend confirms payment captured.
-                                - FAILED = payment failed.
-                                - EXPIRED = payment session expired.
-                                - Never invent payment IDs or status.
-                                - Never bypass payment verification.
-
-                                ========================================
-                                ORDER RULES
-                                ========================================
-
-                                - Use getMyOrders for order history.
-                                - Use getOrder for a specific order.
-                                - Never invent order IDs.
-                                - Never claim an order is PAID unless backend confirms it.
-                                - Never claim an expired order is active.
-
-                                ========================================
-                                CONVERSATION RULES
-                                ========================================
-
-                                - Use conversation history to understand:
-                                  "that one",
-                                  "the first one",
-                                  "add it",
-                                  "remove that",
-                                  "make it 3",
-                                  "the order I just placed".
-
-                                - Resolve references using actual tool results.
-                                - When ambiguous, ask for clarification.
-                                - Never reuse an expired payment session.
-
-                                ========================================
-                                SAFETY
-                                ========================================
-
-                                - Deterministic backend guardrails are authoritative.
-                                - Never override merchant policies.
-                                - Never bypass confirmation requirements.
-                                - Never authorize payment manually.
-                                - Never fabricate backend actions.
-
-                                ========================================
-                                RESPONSE RULES
-                                ========================================
-
-                                - response is for the user.
-                                - Structured response fields are handled by the application.
-                                - Clearly distinguish product discovery, cart changes,
-                                  checkout, payment pending, and payment completion.
-                                """)
+                        .system(fullSystemPrompt)
                         .messages(messages)
-                        .tools(
-                                agentTools,
-                                orderTools
-                        )
+                        .tools(agentTools)
                         .toolContext(
                                 Map.of(
                                         "userId",
@@ -477,7 +414,7 @@ public class AgentService {
             if (checkout.confirmationRequired()) {
 
                 CartResponse cart =
-                        cartClient.getCart(
+                        commerceClient.getCart(
                                 userId
                         );
 
@@ -489,7 +426,7 @@ public class AgentService {
             }
 
             if (session.getCheckoutState()
-                    == CheckoutState.COMPLETED
+                    == CheckoutState.PAYMENT_REQUIRED
                     && session.getCheckoutOrderId() != null) {
 
                 CheckoutDto paymentCheckout =
@@ -531,6 +468,95 @@ public class AgentService {
         return normalResponse(
                 session,
                 response
+        );
+    }
+
+    private String loadSystemPrompt() {
+
+        try {
+            Resource resource = resourceLoader.getResource(
+                    "classpath:prompts/system-prompt.st"
+            );
+
+            return resource.getContentAsString(
+                    java.nio.charset.StandardCharsets.UTF_8
+            );
+
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Failed to load system prompt",
+                    e
+            );
+        }
+    }
+
+    private String buildMemoryContext(ChatSession session) {
+
+        String lastReferencedProduct =
+                session.getLastReferencedProductId() == null
+                        ? "NONE"
+                        : session.getLastReferencedProductId().toString();
+
+        String lastSearchResults =
+                session.getLastSearchResultsJson();
+
+        if (lastSearchResults == null || lastSearchResults.isBlank()) {
+            lastSearchResults = "NONE";
+        }
+
+        return """
+            PERSISTENT CONVERSATION STATE
+            =============================
+
+            Session ID:
+            %s
+
+            User ID:
+            %s
+
+            Last referenced product ID:
+            %s
+
+            Last catalog search results:
+            %s
+
+            REFERENCE RESOLUTION RULES
+            ==========================
+
+            When the user refers to:
+            - "it"
+            - "that"
+            - "that one"
+            - "this"
+            - "this one"
+            - "the one"
+            - "same one"
+
+            use the last referenced product only when it is an
+            unambiguous reference.
+
+            When the user says:
+            - "first one"
+            - "second one"
+            - "third one"
+            - etc.
+
+            resolve the reference against the last catalog search
+            results.
+
+            Never invent a product ID.
+
+            If the reference is ambiguous, ask the user to clarify.
+            Do not guess.
+
+            The persistent application state is authoritative for
+            product identity. Conversation text may explain context,
+            but must not override actual backend state.
+            """.formatted(
+                session.getId(),
+                session.getUserId(),
+                lastReferencedProduct,
+                lastSearchResults
         );
     }
 
@@ -778,70 +804,173 @@ public class AgentService {
     }
 
     private ConfirmationDecision classifyConfirmation(
-            String message
+            String message,
+            ChatSession session
     ) {
 
-        return chatClient
-                .prompt()
-                .system("""
-                        You classify whether a user confirms or rejects
-                        a pending checkout.
+        try {
 
-                        Return ONLY JSON:
+            List<ChatMessage> history =
+                    chatMessageRepository
+                            .findTop20BySessionIdOrderByCreatedAtDesc(
+                                    session.getId()
+                            );
 
-                        {
-                          "confirmed": true,
-                          "rejected": false
-                        }
+            String previousAssistantMessage = "";
 
-                        CONFIRMED means the user clearly wants the
-                        pending checkout to proceed.
+            for (ChatMessage chatMessage : history) {
 
-                        Examples:
-                        "yes"
-                        "yes please"
-                        "yes I want to order it"
-                        "go ahead"
-                        "go ahead with it"
-                        "proceed"
-                        "place the order"
-                        "buy it"
-                        "do it"
-                        "I want it"
+                if (chatMessage.getRole()
+                        == MessageRole.ASSISTANT) {
 
-                        REJECTED means the user clearly wants to cancel.
+                    previousAssistantMessage =
+                            chatMessage.getContent();
 
-                        Examples:
-                        "no"
-                        "cancel"
-                        "cancel it"
-                        "don't buy it"
-                        "do not proceed"
-                        "stop"
+                    break;
+                }
+            }
 
-                        Ambiguous examples:
-                        "maybe"
-                        "wait"
-                        "what happens next?"
-                        "how much is it?"
-                        "I'm thinking about it"
+            String input = """
+                CHECKOUT CONFIRMATION DECISION
 
-                        For ambiguous messages:
+                CHECKOUT STATE:
+                %s
 
-                        {
-                          "confirmed": false,
-                          "rejected": false
-                        }
+                CART:
+                %s
 
-                        Never set both to true.
-                        """)
-                .user(message)
-                .call()
-                .entity(
-                        ConfirmationDecision.class
+                AMOUNT:
+                %s
+
+                CURRENCY:
+                %s
+
+                PREVIOUS ASSISTANT MESSAGE:
+                %s
+
+                CURRENT USER MESSAGE:
+                %s
+                """.formatted(
+                    session.getCheckoutState(),
+                    session.getPendingCheckoutCartId(),
+                    session.getCheckoutAmountInPaise(),
+                    session.getCheckoutCurrency(),
+                    previousAssistantMessage,
+                    message == null ? "" : message
+            );
+
+            String rawResponse =
+                    chatClient
+                            .prompt()
+                            .system("""
+                                You are a strict intent classifier.
+
+                                The application is waiting for the user
+                                to decide whether a pending checkout
+                                should continue.
+
+                                Analyze the CURRENT USER MESSAGE together
+                                with the PREVIOUS ASSISTANT MESSAGE.
+
+                                Return EXACTLY ONE of these values:
+
+                                CONFIRMED
+                                REJECTED
+                                AMBIGUOUS
+
+                                CONFIRMED:
+                                The user intends to proceed with the
+                                pending checkout.
+
+                                REJECTED:
+                                The user intends to cancel the
+                                pending checkout.
+
+                                AMBIGUOUS:
+                                The user's intent cannot be determined.
+
+                                Interpret the current message
+                                conversationally.
+
+                                Do not execute anything.
+                                Do not explain anything.
+                                Do not return JSON.
+                                Do not return markdown.
+                                Return exactly one word:
+                                CONFIRMED
+                                REJECTED
+                                or
+                                AMBIGUOUS
+                                """)
+                            .user(input)
+                            .call()
+                            .content();
+
+            System.out.println(
+                    "CHECKOUT CLASSIFIER INPUT:"
+                            + "\n"
+                            + input
+            );
+
+            System.out.println(
+                    "CHECKOUT CLASSIFIER RESPONSE: "
+                            + rawResponse
+            );
+
+            if (rawResponse == null
+                    || rawResponse.isBlank()) {
+
+                return new ConfirmationDecision(
+                        false,
+                        false
                 );
-    }
+            }
 
+            String decision =
+                    rawResponse
+                            .trim()
+                            .toUpperCase(
+                                    java.util.Locale.ROOT
+                            );
+
+            if (decision.contains("CONFIRMED")) {
+
+                return new ConfirmationDecision(
+                        true,
+                        false
+                );
+            }
+
+            if (decision.contains("REJECTED")) {
+
+                return new ConfirmationDecision(
+                        false,
+                        true
+                );
+            }
+
+            return new ConfirmationDecision(
+                    false,
+                    false
+            );
+
+        } catch (Exception e) {
+
+            System.err.println(
+                    "CHECKOUT CLASSIFICATION ERROR: "
+                            + e.getClass().getName()
+                            + " - "
+                            + e.getMessage()
+            );
+
+            e.printStackTrace();
+
+            return new ConfirmationDecision(
+                    false,
+                    false
+            );
+        }
+    }
     private UUID extractOrderId(
             String orderJson
     ) {
@@ -885,6 +1014,7 @@ public class AgentService {
         ChatMessage message =
                 ChatMessage.builder()
                         .sessionId(sessionId)
+                        .requestId(turnContext.getRequestId())
                         .role(MessageRole.USER)
                         .content(content)
                         .createdAt(LocalDateTime.now())
@@ -903,6 +1033,7 @@ public class AgentService {
         ChatMessage message =
                 ChatMessage.builder()
                         .sessionId(sessionId)
+                        .requestId(turnContext.getRequestId())
                         .role(MessageRole.ASSISTANT)
                         .content(content)
                         .createdAt(LocalDateTime.now())
@@ -918,42 +1049,35 @@ public class AgentService {
             String sessionId
     ) {
 
-        if (sessionId != null
-                && !sessionId.isBlank()) {
+        if (sessionId != null && !sessionId.isBlank()) {
 
-            UUID id =
-                    UUID.fromString(
-                            sessionId
-                    );
+            try {
+                UUID id = UUID.fromString(sessionId);
 
-            return chatSessionRepository
-                    .findByIdAndUserId(
-                            id,
-                            userId
-                    )
-                    .orElseThrow(
-                            () -> new IllegalArgumentException(
-                                    "Chat session not found"
-                            )
-                    );
+                return chatSessionRepository
+                        .findByIdAndUserId(id, userId)
+                        .orElseGet(() -> createNewSession(userId));
+
+            } catch (IllegalArgumentException e) {
+                return createNewSession(userId);
+            }
         }
 
-        LocalDateTime now =
-                LocalDateTime.now();
+        return createNewSession(userId);
+    }
 
-        ChatSession session =
-                ChatSession.builder()
-                        .userId(userId)
-                        .createdAt(now)
-                        .updatedAt(now)
-                        .checkoutState(
-                                CheckoutState.NONE
-                        )
-                        .build();
+    private ChatSession createNewSession(UUID userId) {
 
-        return chatSessionRepository.save(
-                session
-        );
+        LocalDateTime now = LocalDateTime.now();
+
+        ChatSession session = ChatSession.builder()
+                .userId(userId)
+                .createdAt(now)
+                .updatedAt(now)
+                .checkoutState(CheckoutState.NONE)
+                .build();
+
+        return chatSessionRepository.save(session);
     }
 
     @Transactional(readOnly = true)
@@ -1001,4 +1125,6 @@ public class AgentService {
                 session.getCreatedAt()
         );
     }
+
+
 }

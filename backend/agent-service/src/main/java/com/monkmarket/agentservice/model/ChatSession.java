@@ -7,7 +7,19 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "chat_sessions")
+@Table(
+        name = "chat_sessions",
+        indexes = {
+                @Index(
+                        name = "idx_chat_session_session_id",
+                        columnList = "id"
+                ),
+                @Index(
+                        name = "idx_chat_session_user_id",
+                        columnList = "userId"
+                )
+        }
+)
 @Getter
 @Setter
 @NoArgsConstructor
@@ -47,12 +59,17 @@ public class ChatSession {
     @Column
     private String checkoutPaymentStatus;
 
-
     @Column
     private UUID pendingCheckoutCartId;
 
     @Column
     private String pendingCheckoutIdempotencyKey;
+
+    @Column(columnDefinition = "TEXT")
+    private String lastSearchResultsJson;
+
+    @Column
+    private UUID lastReferencedProductId;
 
     @Column(nullable = false)
     private LocalDateTime updatedAt;
