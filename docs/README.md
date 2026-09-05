@@ -88,7 +88,7 @@ Sahayak can:
 
 # 🏗️ Architecture
 
-![System Architecture](docs/architecture/system-architecture.png)
+![System Architecture](architecture/system-architecture.png)
 
 ### Backend Services
 
@@ -138,7 +138,7 @@ Sahayak can:
 
 # 🧠 How Sahayak Works
 
-![AI Workflow](docs/workflows/ai-agent-workflow.png)
+![AI Workflow](workflows/ai-agent-workflow.png)
 
 ```text
 User Message
@@ -260,7 +260,7 @@ MonkMarket uses merchant-defined guardrails such as:
 - AI-assisted checkout limits
 - Upsell limits
 
-![Guardrail Workflow](docs/workflows/guardrail-workflow.png)
+![Guardrail Workflow](workflows/guardrail-workflow.png)
 
 ```text
 AI Action
@@ -281,7 +281,7 @@ Even when the AI requests an action, the backend validates the operation before 
 
 # 💳 Payment
 
-![Payment Workflow](docs/workflows/payment-workflow.png)
+![Payment Workflow](workflows/payment-workflow.png)
 
 Sahayak **does not directly process the customer's payment credentials**.
 
@@ -322,7 +322,7 @@ Razorpay handles the payment experience and the customer authorizes the transact
 
 # 📋 Audit Trail
 
-![Audit Workflow](docs/workflows/audit-workflow.png)
+![Audit Workflow](workflows/audit-workflow.png)
 
 Important AI and commerce actions are recorded for traceability.
 
@@ -363,7 +363,7 @@ This makes the system explainable:
 
 # 🛒 Commerce Flow
 
-![Traditional vs MonkMarket](docs/workflows/traditional-vs-monkmarket.png)
+![Traditional vs MonkMarket](workflows/traditional-vs-monkmarket.png)
 
 ### Traditional
 
@@ -449,32 +449,32 @@ The merchant remains in control of the rules that constrain AI-assisted commerce
 
 ### Sahayak Chat
 
-![Sahayak Chat](docs/screenshots/shopper-chat.png)
+![Sahayak Chat](screenshots/shopper-chat.png)
 
 ### Cart
 
-![Cart](docs/screenshots/cart.png)
+![Cart](screenshots/cart.png)
 
 ### Checkout
 
-![Checkout](docs/screenshots/checkout.png)
+![Checkout](screenshots/checkout.png)
 
 ### Razorpay
 
-![Razorpay Checkout](docs/screenshots/razorpay.png)
+![Razorpay Checkout](screenshots/razorpay.png)
 
 ### Payment Failure
 
-![Payment Failure](docs/screenshots/payment-failure.png)
+![Payment Failure](screenshots/payment-failure.png)
 
 ### Merchant Dashboard
 
-![Merchant Dashboard](docs/screenshots/merchant-dashboard.png)
+![Merchant Dashboard](screenshots/merchant-dashboard.png)
 
 ### Audit Log
 
-![Audit Log 1](docs/screenshots/audit-log.png)
-![Audit Log 2](docs/screenshots/audit-log-2.png)
+![Audit Log 1](screenshots/audit-log.png)
+![Audit Log 2](screenshots/audit-log-2.png)
 
 ---
 
