@@ -5,10 +5,15 @@ class Validators {
     if (value == null || value.trim().isEmpty) {
       return 'Email is required';
     }
-    final emailRegex = RegExp(r'^[^@]+@[^@]+\.[^@]+$');
-    if (!emailRegex.hasMatch(value.trim())) {
+
+    final email = value.trim();
+
+    final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
+    if (!emailRegex.hasMatch(email)) {
       return 'Enter a valid email address';
     }
+
     return null;
   }
 
@@ -16,9 +21,11 @@ class Validators {
     if (value == null || value.isEmpty) {
       return 'Password is required';
     }
-    if (value.length < 6) {
-      return 'Password must be at least 6 characters';
+
+    if (value.length < 8) {
+      return 'Password must be at least 8 characters';
     }
+
     return null;
   }
 
@@ -26,6 +33,7 @@ class Validators {
     if (value == null || value.trim().isEmpty) {
       return '$fieldName is required';
     }
+
     return null;
   }
 }

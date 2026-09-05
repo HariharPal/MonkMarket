@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_config.dart';
 import '../../../core/network/api_exception.dart';
@@ -12,9 +13,11 @@ class AuthRepository {
 
   Future<AuthUser> login(String email, String password) async {
     try {
+      final cleanEmail = email.trim();
+
       final response = await _apiClient.post<Map<String, dynamic>>(
         '${ApiConfig.authBase}/login',
-        data: {'email': email, 'password': password},
+        data: {'email': cleanEmail, 'password': password},
       );
 
       final data = response.data;
@@ -44,6 +47,7 @@ class AuthRepository {
       await _secureStorage.saveAccessToken(token);
       await _secureStorage.saveUserId(user.userId);
 
+      // Existing storage method is reused.
       await _secureStorage.saveUsername(user.email);
 
       return user;
@@ -60,9 +64,14 @@ class AuthRepository {
     required String password,
   }) async {
     try {
-      final response = await _apiClient.post<dynamic>(
+      final response = await _apiClient.post<String>(
         '${ApiConfig.authBase}/register',
-        data: {'name': name, 'email': email, 'password': password},
+        data: {
+          'name': name.trim(),
+          'email': email.trim(),
+          'password': password,
+        },
+        options: Options(responseType: ResponseType.plain),
       );
 
       if (response.statusCode == null ||

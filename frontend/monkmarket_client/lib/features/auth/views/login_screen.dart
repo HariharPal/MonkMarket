@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../viewmodels/auth_viewmodel.dart';
 import '../../../core/utils/validators.dart';
 
@@ -13,23 +14,39 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController();
+
+  final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+
   bool _obscurePassword = true;
 
   @override
   void dispose() {
-    _usernameController.dispose();
+    _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
   Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    debugPrint('LOGIN EMAIL: $email');
+    debugPrint('LOGIN PASSWORD LENGTH: ${password.length}');
+
     final success = await ref
         .read(authViewModelProvider.notifier)
-        .login(_usernameController.text.trim(), _passwordController.text);
-    if (success && mounted) {
+        .login(email, password);
+
+    if (!mounted) {
+      return;
+    }
+
+    if (success) {
       context.go('/home');
     }
   }
@@ -53,13 +70,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const SizedBox(height: 32),
-                    // Logo / Brand
+
+                    // Logo
                     Icon(
                       Icons.shopping_bag_rounded,
                       size: 64,
                       color: colorScheme.primary,
                     ),
+
                     const SizedBox(height: 16),
+
+                    // Brand
                     Text(
                       'MonkMarket',
                       style: theme.textTheme.displayMedium?.copyWith(
@@ -68,7 +89,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       textAlign: TextAlign.center,
                     ),
+
                     const SizedBox(height: 8),
+
                     Text(
                       'Shop smarter with Sahayak',
                       style: theme.textTheme.bodyMedium?.copyWith(
@@ -76,27 +99,42 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       textAlign: TextAlign.center,
                     ),
+
                     const SizedBox(height: 48),
+
                     Text('Welcome back', style: theme.textTheme.headlineMedium),
+
                     const SizedBox(height: 8),
+
                     Text(
                       'Sign in to continue',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
                     ),
+
                     const SizedBox(height: 32),
+
+                    // EMAIL
                     TextFormField(
-                      controller: _usernameController,
+                      controller: _emailController,
                       decoration: const InputDecoration(
-                        labelText: 'Username',
-                        prefixIcon: Icon(Icons.person_outline_rounded),
+                        labelText: 'Email',
+                        hintText: 'you@example.com',
+                        prefixIcon: Icon(Icons.email_outlined),
                       ),
+                      keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.next,
-                      validator: (v) =>
-                          Validators.validateRequired(v, 'Username'),
+                      autofillHints: const [
+                        AutofillHints.username,
+                        AutofillHints.email,
+                      ],
+                      validator: Validators.validateEmail,
                     ),
+
                     const SizedBox(height: 16),
+
+                    // PASSWORD
                     TextFormField(
                       controller: _passwordController,
                       obscureText: _obscurePassword,
@@ -109,15 +147,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 ? Icons.visibility_off_outlined
                                 : Icons.visibility_outlined,
                           ),
-                          onPressed: () => setState(
-                            () => _obscurePassword = !_obscurePassword,
-                          ),
+                          onPressed: () {
+                            setState(() {
+                              _obscurePassword = !_obscurePassword;
+                            });
+                          },
                         ),
                       ),
                       textInputAction: TextInputAction.done,
+                      autofillHints: const [AutofillHints.password],
                       onFieldSubmitted: (_) => _login(),
                       validator: Validators.validatePassword,
                     ),
+
+                    // ERROR
                     if (authState.error != null) ...[
                       const SizedBox(height: 16),
                       Container(
@@ -134,7 +177,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ),
                     ],
+
                     const SizedBox(height: 24),
+
+                    // LOGIN BUTTON
                     ElevatedButton(
                       onPressed: authState.isLoading ? null : _login,
                       child: authState.isLoading
@@ -148,7 +194,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             )
                           : const Text('Sign In'),
                     ),
+
                     const SizedBox(height: 16),
+
+                    // REGISTER
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -162,6 +211,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ],
                     ),
+
                     const SizedBox(height: 32),
                   ],
                 ),
